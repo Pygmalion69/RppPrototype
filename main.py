@@ -1,7 +1,7 @@
 import argparse
 
 from rpp.graph_loader import load_graphs
-from rpp.required_edges import build_required_graph
+from rpp.required_edges import build_required_graph_undirected
 from rpp.rpp_solver import solve_rpp
 from rpp.gpx_export import export_gpx
 
@@ -20,7 +20,7 @@ def main():
         args.osm,
         ignore_oneway=args.ignore_oneway,
     )
-    R = build_required_graph(G_service_undirected)
+    R = build_required_graph_undirected(G_service_undirected)
     E = solve_rpp(G_drive, G_service_undirected, R)
 
     export_gpx(E, G_service_undirected, "rpp_route.gpx")
