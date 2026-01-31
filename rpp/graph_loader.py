@@ -29,7 +29,8 @@ def load_graphs(osm_file: str, ignore_oneway: bool = False):
         # Directed driving graph respects one-ways
         G_drive = G_filt
 
-    # Service graph for required edges + geometry lookup is always undirected
-    G_service = ox.convert.to_undirected(G_filt)
+    # Service graphs for required edges + geometry lookup
+    G_service_undirected = ox.convert.to_undirected(G_filt)
+    G_service_directed = G_filt
 
-    return G_drive, G_service
+    return G_drive, G_service_undirected, G_service_directed
