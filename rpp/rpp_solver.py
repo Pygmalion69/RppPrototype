@@ -3,7 +3,7 @@ import networkx as nx
 
 
 def solve_rpp(
-    G_drive: nx.MultiDiGraph,
+    G_drive: nx.Graph,  # <- accepts MultiDiGraph OR MultiGraph
     G_service: nx.MultiGraph,
     R: nx.Graph,
 ) -> nx.MultiGraph:
