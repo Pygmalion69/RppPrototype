@@ -5,6 +5,7 @@ import networkx as nx
 REQUIRED_HIGHWAYS = {
     "residential",
     "living_street",
+    "tertiary",
     "unclassified"
 }
 
