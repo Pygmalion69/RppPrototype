@@ -1,8 +1,11 @@
 import argparse
 
 from rpp.graph_loader import load_graphs
-from rpp.required_edges import build_required_graph
-from rpp.rpp_solver import solve_rpp
+from rpp.required_edges import (
+    build_required_graph_directed,
+    build_required_graph_undirected,
+)
+from rpp.rpp_solver import solve_drpp, solve_rpp
 from rpp.gpx_export import export_gpx
 
 
@@ -14,13 +17,26 @@ def main():
         action="store_true",
         help="Treat one-way streets as bidirectional for driving graph shortest paths",
     )
+    parser.add_argument(
+        "--directed-service",
+        action="store_true",
+        help="Use directed service graph with directed required edges",
+    )
     args = parser.parse_args()
 
-    G_drive, G_service = load_graphs(args.osm, ignore_oneway=args.ignore_oneway)
-    R = build_required_graph(G_service)
-    E = solve_rpp(G_drive, G_service, R)
+    G_drive, G_service_undirected, G_service_directed = load_graphs(
+        args.osm,
+        ignore_oneway=args.ignore_oneway,
+    )
 
-    export_gpx(E, G_service, "rpp_route.gpx")
+    if args.directed_service:
+        R = build_required_graph_directed(G_service_directed)
+        E = solve_drpp(G_drive, G_service_directed, R)
+        export_gpx(E, G_service_directed, "rpp_route.gpx")
+    else:
+        R = build_required_graph_undirected(G_service_undirected)
+        E = solve_rpp(G_drive, G_service_undirected, R)
+        export_gpx(E, G_service_undirected, "rpp_route.gpx")
     print("Done. GPX written: rpp_route.gpx")
 
 
