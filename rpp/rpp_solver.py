@@ -121,6 +121,29 @@ def solve_drpp(
             kind: "required" | "connector" | "duplicate"
     """
 
+    required_nodes = set(R.nodes)
+    missing_nodes = required_nodes - set(G_drive.nodes)
+    if missing_nodes:
+        sample = sorted(missing_nodes)[:10]
+        raise RuntimeError(f"Required nodes missing from G_drive: {sample}...")
+
+    if required_nodes:
+        required_sccs = []
+        for comp in nx.strongly_connected_components(G_drive):
+            req_in_comp = required_nodes.intersection(comp)
+            if req_in_comp:
+                required_sccs.append((len(comp), sorted(req_in_comp)[:3]))
+
+        if len(required_sccs) > 1:
+            parts = [
+                f"scc_size={size} sample_required={sample}"
+                for size, sample in required_sccs[:5]
+            ]
+            raise RuntimeError(
+                "Required nodes span multiple strongly connected components in G_drive; "
+                f"directed tour impossible. {', '.join(parts)}"
+            )
+
     # ---- Step 0: connect required-arc components (using directed driving graph) ----
     components = list(nx.strongly_connected_components(R))
     reps = [next(iter(c)) for c in components]
@@ -134,7 +157,11 @@ def solve_drpp(
                 _, path = nx.single_source_dijkstra(G_drive, b, a, weight="weight")
                 path = list(reversed(path))
             except nx.NetworkXNoPath as e:
-                raise RuntimeError(f"No directed path between required components: {a} <-> {b}") from e
+                raise RuntimeError(
+                    f"No directed path between required components: {a} <-> {b}. "
+                    "Required nodes may not be in the same strongly connected component "
+                    "of G_drive."
+                ) from e
 
         connector_paths.append(path)
 
