@@ -5,8 +5,8 @@ from rpp.required_edges import (
     build_required_graph_directed,
     build_required_graph_undirected,
 )
-from rpp.rpp_solver import solve_drpp, solve_rpp
-from rpp.gpx_export import export_gpx
+from rpp.rpp_solver import find_drpp_blocking_edges, solve_drpp, solve_rpp
+from rpp.gpx_export import export_edge_list_gpx, export_gpx
 
 
 def main():
@@ -27,6 +27,16 @@ def main():
         default=None,
         help="Write DRPP diagnostics report to this path",
     )
+    parser.add_argument(
+        "--drop-drpp-blockers",
+        action="store_true",
+        help="Drop required edges outside the largest SCC before solving DRPP",
+    )
+    parser.add_argument(
+        "--drpp-blockers-gpx",
+        default=None,
+        help="Write blocking required edges to this GPX path",
+    )
     args = parser.parse_args()
 
     G_drive, G_service_undirected, G_service_directed = load_graphs(
@@ -36,6 +46,23 @@ def main():
 
     if args.directed_service:
         R = build_required_graph_directed(G_service_directed)
+        if args.drop_drpp_blockers or args.drpp_blockers_gpx:
+            blockers, _required_outside, _scc_index, _scc_sizes, _largest = find_drpp_blocking_edges(
+                G_drive, R
+            )
+            blocker_edges = [(u, v) for u, v, _su, _sv in blockers]
+
+            if args.drpp_blockers_gpx and blocker_edges:
+                export_edge_list_gpx(
+                    G_service_directed,
+                    blocker_edges,
+                    args.drpp_blockers_gpx,
+                )
+
+            if args.drop_drpp_blockers and blocker_edges:
+                for u, v in blocker_edges:
+                    if R.has_edge(u, v):
+                        R.remove_edge(u, v)
         E = solve_drpp(
             G_drive,
             G_service_directed,
