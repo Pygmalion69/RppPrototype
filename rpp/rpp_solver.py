@@ -123,7 +123,10 @@ def solve_drpp(
             kind: "required" | "connector" | "duplicate"
     """
 
-    required_nodes = set(R.nodes)
+    required_nodes = set()
+    for u, v in R.edges():
+        required_nodes.add(u)
+        required_nodes.add(v)
     missing_nodes = required_nodes - set(G_drive.nodes)
     if missing_nodes:
         sample = sorted(missing_nodes)[:10]

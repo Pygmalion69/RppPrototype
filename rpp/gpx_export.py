@@ -19,13 +19,10 @@ def export_gpx(E: nx.MultiGraph, G: nx.MultiGraph, filename: str):
         geom = data.get("geometry")
 
         if geom is None:
-            raise RuntimeError(f"Missing geometry for edge {u}->{v}")
-
-            # fallback (should rarely happen)
-            # coords = [
-            #     (G.nodes[u]["x"], G.nodes[u]["y"]),
-            #     (G.nodes[v]["x"], G.nodes[v]["y"]),
-            # ]
+            coords = [
+                (G.nodes[u]["x"], G.nodes[u]["y"]),
+                (G.nodes[v]["x"], G.nodes[v]["y"]),
+            ]
         else:
             coords = list(geom.coords)
 

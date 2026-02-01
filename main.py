@@ -1,4 +1,5 @@
 import argparse
+import sys
 
 from rpp.graph_loader import load_graphs
 from rpp.required_edges import (
@@ -60,9 +61,16 @@ def main():
                 )
 
             if args.drop_drpp_blockers and blocker_edges:
+                print(
+                    f"WARNING: Dropping {len(blocker_edges)} blocking required edges outside the largest SCC.",
+                    file=sys.stderr,
+                )
                 for u, v in blocker_edges:
                     if R.has_edge(u, v):
                         R.remove_edge(u, v)
+                isolates = [n for n in R.nodes if R.degree(n) == 0]
+                if isolates:
+                    R.remove_nodes_from(isolates)
         E = solve_drpp(
             G_drive,
             G_service_directed,
