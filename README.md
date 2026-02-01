@@ -16,7 +16,12 @@ GPX file.
     min-weight matching.
   - Directed solver respects one-way restrictions for both routing and required arcs,
     balancing in/out degree with min-cost flow.
+- **Directed preflight + diagnostics**: validates required nodes against the drive graph,
+  checks strongly connected components, and can emit a DRPP diagnostics report or a GPX
+  file of blocking required edges.
 - **GPX export**: generates a GPX route with edge geometry for navigation.
+- **Geometry-preserving edge selection**: prefers OSM edges with geometry when building the
+  Eulerian multigraph to avoid straight-line fallbacks.
 
 ## Usage
 Run the main script to process the sample data:
@@ -33,6 +38,12 @@ python main.py --osm data/area.osm
 - `--ignore-oneway`: treats one-way streets as bidirectional for shortest-path routing.
 - `--directed-service`: uses the directed service graph and the directed solver for
   required arcs, fully respecting one-way restrictions.
+- `--drpp-diagnostics`: writes a DRPP diagnostics report (SCC sizes, required nodes/edges
+  outside the largest SCC, and cross-SCC required edges).
+- `--drop-drpp-blockers`: removes required edges that fall outside the largest SCC before
+  solving the directed problem.
+- `--drpp-blockers-gpx`: writes blocking required edges to a GPX file (useful for inspection
+  before dropping them).
 
 The solver writes `rpp_route.gpx` in the current directory.
 
