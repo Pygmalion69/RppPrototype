@@ -1,23 +1,36 @@
 import osmnx as ox
 import networkx as nx
 
+from rpp.filters import filter_graph_edges
 
-def load_graph(osm_file: str) -> nx.MultiGraph:
-    G = ox.graph_from_xml(osm_file, simplify=True)
-    G = ox.convert.to_undirected(G)
 
-    # Keep largest connected component
-    if not nx.is_connected(G):
-        largest_cc = max(nx.connected_components(G), key=len)
-        G = G.subgraph(largest_cc).copy()
+def load_graphs(osm_file: str, ignore_oneway: bool = False):
+    # Load raw (directed, one-way aware)
+    G_raw = ox.graph_from_xml(osm_file, simplify=True)
+    G_raw.graph.setdefault("crs", "EPSG:4326")
 
-    # Ensure weights
-    for u, v, k, data in G.edges(keys=True, data=True):
-        if "length" in data:
-            data["weight"] = data["length"]
-        else:
-            x1, y1 = G.nodes[u]["x"], G.nodes[u]["y"]
-            x2, y2 = G.nodes[v]["x"], G.nodes[v]["y"]
-            data["weight"] = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+    # Filter edges (IMPORTANT: filter_graph_edges must copy G.graph metadata)
+    G_filt = filter_graph_edges(G_raw)
 
-    return G
+    # Keep largest weakly connected component (directed)
+    if not nx.is_weakly_connected(G_filt):
+        largest = max(nx.weakly_connected_components(G_filt), key=len)
+        G_filt = G_filt.subgraph(largest).copy()
+
+    # Ensure weights on the filtered graph
+    for u, v, k, data in G_filt.edges(keys=True, data=True):
+        data["weight"] = data.get("length", 1.0)
+
+    # Driving graph: directed or undirected depending on flag
+    if ignore_oneway:
+        # Undirected driving graph ignores one-ways for shortest paths
+        G_drive = ox.convert.to_undirected(G_filt)
+    else:
+        # Directed driving graph respects one-ways
+        G_drive = G_filt
+
+    # Service graphs for required edges + geometry lookup
+    G_service_undirected = ox.convert.to_undirected(G_filt)
+    G_service_directed = G_filt
+
+    return G_drive, G_service_undirected, G_service_directed
