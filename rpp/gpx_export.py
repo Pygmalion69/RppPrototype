@@ -67,12 +67,12 @@ def export_edge_list_gpx(G: nx.MultiGraph, edges, filename: str):
     for u, v in edges:
         data = _best_edge_data(G, u, v)
         geom = data.get("geometry")
-        if geom is None:
-            raise RuntimeError(f"Missing geometry for edge {u}->{v}")
-
-        coords = list(geom.coords)
         ux, uy = G.nodes[u]["x"], G.nodes[u]["y"]
         vx, vy = G.nodes[v]["x"], G.nodes[v]["y"]
+        if geom is None:
+            coords = [(ux, uy), (vx, vy)]
+        else:
+            coords = list(geom.coords)
 
         start = coords[0]
         end = coords[-1]
