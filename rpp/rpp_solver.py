@@ -107,6 +107,8 @@ def solve_drpp(
     G_drive: nx.MultiDiGraph,
     G_service_directed: nx.MultiDiGraph,
     R: nx.DiGraph,
+    *,
+    diagnostics_path: str = None,
 ) -> nx.MultiDiGraph:
     """
     Solve a directed RPP-like problem where:
@@ -129,6 +131,21 @@ def solve_drpp(
 
     if required_nodes:
         required_sccs = []
+        scc_index, scc_sizes, largest_scc_id = compute_scc_index(G_drive)
+
+        if diagnostics_path:
+            try:
+                write_drpp_diagnostics(
+                    diagnostics_path,
+                    G_drive,
+                    R,
+                    scc_index,
+                    scc_sizes,
+                    largest_scc_id,
+                )
+            except OSError as e:
+                raise RuntimeError(f"Failed to write diagnostics to {diagnostics_path}") from e
+
         for comp in nx.strongly_connected_components(G_drive):
             req_in_comp = required_nodes.intersection(comp)
             if req_in_comp:
@@ -219,6 +236,94 @@ def solve_drpp(
         raise RuntimeError("Directed RPP result is not Eulerian.")
 
     return E
+
+
+def compute_scc_index(G_drive: nx.MultiDiGraph):
+    scc_index = {}
+    scc_sizes = {}
+    for idx, comp in enumerate(nx.strongly_connected_components(G_drive)):
+        scc_sizes[idx] = len(comp)
+        for n in comp:
+            scc_index[n] = idx
+    largest_scc_id = max(scc_sizes, key=lambda k: scc_sizes[k]) if scc_sizes else None
+    return scc_index, scc_sizes, largest_scc_id
+
+
+def find_drpp_blocking_edges(G_drive: nx.MultiDiGraph, R: nx.DiGraph):
+    required_nodes = set(R.nodes)
+    if not required_nodes:
+        return [], [], {}, {}, None
+
+    scc_index, scc_sizes, largest_scc_id = compute_scc_index(G_drive)
+
+    required_outside = [
+        n for n in required_nodes if scc_index.get(n, None) != largest_scc_id
+    ]
+    blocking_edges = []
+    for u, v in R.edges():
+        scc_u = scc_index.get(u, None)
+        scc_v = scc_index.get(v, None)
+        if scc_u != largest_scc_id or scc_v != largest_scc_id:
+            blocking_edges.append((u, v, scc_u, scc_v))
+
+    return blocking_edges, required_outside, scc_index, scc_sizes, largest_scc_id
+
+
+def write_drpp_diagnostics(
+    path: str,
+    G_drive: nx.MultiDiGraph,
+    R: nx.DiGraph,
+    scc_index: dict,
+    scc_sizes: dict,
+    largest_scc_id: int,
+):
+    required_nodes = set(R.nodes)
+    required_edges = list(R.edges())
+    required_outside = [
+        n for n in required_nodes if scc_index.get(n, None) != largest_scc_id
+    ]
+    required_edges_outside = [
+        (u, v) for u, v in required_edges
+        if scc_index.get(u, None) != largest_scc_id
+        or scc_index.get(v, None) != largest_scc_id
+    ]
+    cross_scc_edges = [
+        (u, v) for u, v in required_edges
+        if scc_index.get(u, None) != scc_index.get(v, None)
+    ]
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("# DRPP diagnostics\n")
+        f.write(f"drive_nodes={G_drive.number_of_nodes()}\n")
+        f.write(f"drive_edges={G_drive.number_of_edges()}\n")
+        f.write(f"required_nodes={len(required_nodes)}\n")
+        f.write(f"required_edges={len(required_edges)}\n")
+        f.write(f"scc_count={len(scc_sizes)}\n")
+        if largest_scc_id is not None:
+            f.write(f"largest_scc_id={largest_scc_id}\n")
+            f.write(f"largest_scc_size={scc_sizes[largest_scc_id]}\n")
+        f.write(f"required_nodes_outside_largest_scc={len(required_outside)}\n")
+        f.write(f"required_edges_outside_largest_scc={len(required_edges_outside)}\n")
+        f.write(f"required_edges_crossing_sccs={len(cross_scc_edges)}\n")
+        f.write("\n")
+
+        f.write("[required_nodes_outside_largest_scc]\n")
+        for n in sorted(required_outside):
+            f.write(f"{n},scc={scc_index.get(n, None)}\n")
+        f.write("\n")
+
+        f.write("[required_edges_outside_largest_scc]\n")
+        for u, v in required_edges_outside:
+            f.write(
+                f"{u},{v},scc_u={scc_index.get(u, None)},scc_v={scc_index.get(v, None)}\n"
+            )
+        f.write("\n")
+
+        f.write("[required_edges_crossing_sccs]\n")
+        for u, v in cross_scc_edges:
+            f.write(
+                f"{u},{v},scc_u={scc_index.get(u, None)},scc_v={scc_index.get(v, None)}\n"
+            )
 
 
 def add_edge_with_geometry(

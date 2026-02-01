@@ -22,6 +22,11 @@ def main():
         action="store_true",
         help="Use directed service graph with directed required edges",
     )
+    parser.add_argument(
+        "--drpp-diagnostics",
+        default=None,
+        help="Write DRPP diagnostics report to this path",
+    )
     args = parser.parse_args()
 
     G_drive, G_service_undirected, G_service_directed = load_graphs(
@@ -31,7 +36,12 @@ def main():
 
     if args.directed_service:
         R = build_required_graph_directed(G_service_directed)
-        E = solve_drpp(G_drive, G_service_directed, R)
+        E = solve_drpp(
+            G_drive,
+            G_service_directed,
+            R,
+            diagnostics_path=args.drpp_diagnostics,
+        )
         export_gpx(E, G_service_directed, "rpp_route.gpx")
     else:
         R = build_required_graph_undirected(G_service_undirected)
