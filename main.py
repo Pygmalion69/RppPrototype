@@ -10,6 +10,20 @@ from rpp.rpp_solver import find_drpp_blocking_edges, solve_drpp, solve_rpp
 from rpp.gpx_export import export_edge_list_gpx, export_gpx
 
 
+def _parse_start(raw: str | None) -> tuple[float, float] | None:
+    if raw is None:
+        return None
+    parts = [p.strip() for p in raw.split(",")]
+    if len(parts) != 2:
+        raise ValueError("--start must be provided as 'lat,lon'.")
+    try:
+        lat = float(parts[0])
+        lon = float(parts[1])
+    except ValueError as exc:
+        raise ValueError("--start must contain valid numbers like '51.0,6.1'.") from exc
+    return lat, lon
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--osm", default="data/area.osm", help="Path to .osm file")
@@ -37,6 +51,11 @@ def main():
         "--drpp-blockers-gpx",
         default=None,
         help="Write blocking required edges to this GPX path",
+    )
+    parser.add_argument(
+        "--start",
+        default=None,
+        help="Optional start coordinate as 'lat,lon' to snap to the nearest node",
     )
     args = parser.parse_args()
 
@@ -77,11 +96,11 @@ def main():
             R,
             diagnostics_path=args.drpp_diagnostics,
         )
-        export_gpx(E, G_service_directed, "rpp_route.gpx")
+        export_gpx(E, G_service_directed, "rpp_route.gpx", start=_parse_start(args.start))
     else:
         R = build_required_graph_undirected(G_service_undirected)
         E = solve_rpp(G_drive, G_service_undirected, R)
-        export_gpx(E, G_service_undirected, "rpp_route.gpx")
+        export_gpx(E, G_service_undirected, "rpp_route.gpx", start=_parse_start(args.start))
     print("Done. GPX written: rpp_route.gpx")
 
 
