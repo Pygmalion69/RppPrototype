@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from html import escape
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Tuple
 
 import networkx as nx
 
 
 @dataclass(frozen=True)
-class VisualizationEdge:
-    source: str
-    target: str
-    label: str
+class SegmentRow:
+    index: int
+    start: int
+    end: int
+    street: str
+    kind: str
+    distance: float
 
 
 def visualize_solution(
@@ -20,67 +23,60 @@ def visualize_solution(
     output_path: str,
 ) -> None:
     """
-    Write an HTML file with a Mermaid flowchart of the Eulerian circuit.
+    Write an HTML file with a per-segment overview of the Eulerian circuit.
 
-    The visualization renders the traversed sequence of nodes with labeled arrows
-    (required/connector/duplicate) so the route order is explicit.
+    The visualization renders the ordered list of traversed segments (street name,
+    edge kind, and distance) plus a summary grouped by street.
     """
     circuit = list(nx.eulerian_circuit(E))
     if not circuit:
         raise RuntimeError("Eulerian circuit is empty; cannot visualize solution.")
 
-    node_labels = _build_node_labels(circuit)
-    edges = _build_edges(circuit, E)
-    sequence = _build_sequence(circuit)
+    segments = _build_segments(circuit, E, G_service)
+    summary = _summarize_by_street(segments)
 
-    html = _render_html(node_labels, edges, sequence, G_service.graph.get("crs"))
+    html = _render_html(segments, summary, G_service.graph.get("crs"))
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(html)
 
-
-def _build_node_labels(circuit: Iterable[tuple]) -> Dict[str, str]:
-    unique_nodes: List[int] = []
-    for u, v in circuit:
-        if u not in unique_nodes:
-            unique_nodes.append(u)
-        if v not in unique_nodes:
-            unique_nodes.append(v)
-    return {f"n{idx}": str(node) for idx, node in enumerate(unique_nodes)}
-
-
-def _build_edges(
+def _build_segments(
     circuit: Iterable[tuple],
     E: nx.Graph,
-) -> List[VisualizationEdge]:
-    node_map: Dict[int, str] = {}
-    for idx, node in enumerate(_collect_nodes(circuit)):
-        node_map[node] = f"n{idx}"
-
-    edges: List[VisualizationEdge] = []
+    G_service: nx.Graph,
+) -> List[SegmentRow]:
+    segments: List[SegmentRow] = []
     for idx, (u, v) in enumerate(circuit, start=1):
-        data = _edge_data(E, u, v)
-        label = f"{idx}: {data.get('kind', 'route')}"
-        edges.append(VisualizationEdge(node_map[u], node_map[v], label))
-    return edges
+        e_data = _edge_data(E, u, v)
+        kind = str(e_data.get("kind", "route"))
+        distance = float(e_data.get("weight", 0.0))
+        street = _street_name(G_service, u, v)
+        segments.append(SegmentRow(idx, u, v, street, kind, distance))
+    return segments
 
 
-def _build_sequence(circuit: Iterable[tuple]) -> List[int]:
-    nodes = []
-    for u, v in circuit:
-        if not nodes:
-            nodes.append(u)
-        nodes.append(v)
-    return nodes
+def _summarize_by_street(segments: List[SegmentRow]) -> List[Tuple[str, int, float, str]]:
+    summary: Dict[str, Dict[str, object]] = {}
+    for segment in segments:
+        entry = summary.setdefault(
+            segment.street,
+            {"count": 0, "distance": 0.0, "kinds": set()},
+        )
+        entry["count"] = int(entry["count"]) + 1
+        entry["distance"] = float(entry["distance"]) + segment.distance
+        entry["kinds"].add(segment.kind)
 
-
-def _collect_nodes(circuit: Iterable[tuple]) -> List[int]:
-    nodes: List[int] = []
-    for u, v in circuit:
-        if u not in nodes:
-            nodes.append(u)
-        if v not in nodes:
-            nodes.append(v)
-    return nodes
+    ordered = sorted(
+        summary.items(), key=lambda item: (-item[1]["count"], item[0].lower())
+    )
+    return [
+        (
+            street,
+            int(values["count"]),
+            float(values["distance"]),
+            ", ".join(sorted(values["kinds"])),
+        )
+        for street, values in ordered
+    ]
 
 
 def _edge_data(E: nx.Graph, u: int, v: int) -> dict:
@@ -94,22 +90,16 @@ def _edge_data(E: nx.Graph, u: int, v: int) -> dict:
 
 
 def _render_html(
-    node_labels: Dict[str, str],
-    edges: List[VisualizationEdge],
-    sequence: List[int],
+    segments: List[SegmentRow],
+    summary: List[Tuple[str, int, float, str]],
     crs: str | None,
 ) -> str:
-    mermaid_lines = ["flowchart LR"]
-    for node_id, label in node_labels.items():
-        mermaid_lines.append(f'  {node_id}["{escape(label)}"]')
-    for edge in edges:
-        mermaid_lines.append(
-            f'  {edge.source} -->|"{escape(edge.label)}"| {edge.target}'
-        )
-
-    mermaid_diagram = "\n".join(mermaid_lines)
-    sequence_text = " → ".join(escape(str(node)) for node in sequence)
     crs_text = escape(crs) if crs else "unknown"
+    segment_rows = "\n".join(_render_segment_row(segment) for segment in segments)
+    summary_rows = "\n".join(
+        _render_summary_row(street, count, distance, kinds)
+        for street, count, distance, kinds in summary
+    )
 
     return f"""<!doctype html>
 <html lang="en">
@@ -136,11 +126,26 @@ def _render_html(
         line-height: 1.6;
         word-break: break-word;
       }}
+      table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }}
+      th,
+      td {{
+        border-bottom: 1px solid #e2e8f0;
+        padding: 8px 10px;
+        text-align: left;
+      }}
+      th {{
+        background: #f1f5f9;
+        font-weight: 600;
+      }}
+      .mono {{
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+        font-size: 12px;
+      }}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script>
-      mermaid.initialize({{ startOnLoad: true }});
-    </script>
   </head>
   <body>
     <div class="panel">
@@ -148,15 +153,84 @@ def _render_html(
       <p>Coordinate reference system: <strong>{crs_text}</strong></p>
     </div>
     <div class="panel">
-      <h2>Eulerian Circuit Graph</h2>
-      <div class="mermaid">
-{mermaid_diagram}
-      </div>
+      <h2>Street Summary</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Street</th>
+            <th>Segment Count</th>
+            <th>Total Distance</th>
+            <th>Kinds</th>
+          </tr>
+        </thead>
+        <tbody>
+          {summary_rows}
+        </tbody>
+      </table>
     </div>
     <div class="panel">
-      <h2>Node Traversal Sequence</h2>
-      <div class="sequence">{sequence_text}</div>
+      <h2>Segment-by-Segment Route</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Street</th>
+            <th>Kind</th>
+            <th>Distance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {segment_rows}
+        </tbody>
+      </table>
     </div>
   </body>
 </html>
 """
+
+
+def _street_name(G_service: nx.Graph, u: int, v: int) -> str:
+    data = G_service.get_edge_data(u, v)
+    if not data and G_service.is_directed():
+        data = G_service.get_edge_data(v, u)
+    if not data:
+        return "unnamed"
+    if isinstance(G_service, (nx.MultiGraph, nx.MultiDiGraph)):
+        candidate = next(iter(data.values()))
+    else:
+        candidate = data
+    name = candidate.get("name")
+    if isinstance(name, list):
+        name = ", ".join(str(part) for part in name if part)
+    return str(name) if name else "unnamed"
+
+
+def _render_segment_row(segment: SegmentRow) -> str:
+    return (
+        "          <tr>"
+        f"<td class=\"mono\">{segment.index}</td>"
+        f"<td class=\"mono\">{escape(str(segment.start))}</td>"
+        f"<td class=\"mono\">{escape(str(segment.end))}</td>"
+        f"<td>{escape(segment.street)}</td>"
+        f"<td>{escape(segment.kind)}</td>"
+        f"<td class=\"mono\">{segment.distance:.2f}</td>"
+        "</tr>"
+    )
+
+
+def _render_summary_row(
+    street: str,
+    count: int,
+    distance: float,
+    kinds: str,
+) -> str:
+    return (
+        "          <tr>"
+        f"<td>{escape(street)}</td>"
+        f"<td class=\"mono\">{count}</td>"
+        f"<td class=\"mono\">{distance:.2f}</td>"
+        f"<td>{escape(kinds)}</td>"
+        "</tr>"
+    )
