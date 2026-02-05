@@ -20,6 +20,8 @@ GPX file.
   checks strongly connected components, and can emit a DRPP diagnostics report or a GPX
   file of blocking required edges.
 - **GPX export**: generates a GPX route with edge geometry for navigation.
+- **Optional start-point snapping**: provide a `lat,lon` to snap the GPX tour to the
+  nearest graph node and start the Eulerian circuit there.
 - **Geometry-preserving edge selection**: prefers OSM edges with geometry when building the
   Eulerian multigraph to avoid straight-line fallbacks.
 
@@ -44,6 +46,8 @@ python main.py --osm data/area.osm
   solving the directed problem.
 - `--drpp-blockers-gpx`: writes blocking required edges to a GPX file (useful for inspection
   before dropping them).
+- `--start`: optional `lat,lon` start coordinate to snap to the nearest node before
+  exporting the GPX route.
 
 The solver writes `rpp_route.gpx` in the current directory.
 
@@ -55,4 +59,3 @@ pytest
 
 ### Sample
 https://github.com/user-attachments/assets/3958631c-9b01-4edf-b342-266f00c53466
-
