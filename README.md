@@ -44,6 +44,7 @@ python main.py --osm data/area.osm
   solving the directed problem.
 - `--drpp-blockers-gpx`: writes blocking required edges to a GPX file (useful for inspection
   before dropping them).
+- `--visualize`: writes an HTML visualization of the solution route (Mermaid flowchart).
 
 The solver writes `rpp_route.gpx` in the current directory.
 
@@ -55,4 +56,3 @@ pytest
 
 ### Sample
 https://github.com/user-attachments/assets/3958631c-9b01-4edf-b342-266f00c53466
-

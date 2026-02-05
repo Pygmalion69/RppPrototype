@@ -7,6 +7,7 @@ from rpp.required_edges import (
     build_required_graph_undirected,
 )
 from rpp.rpp_solver import find_drpp_blocking_edges, solve_drpp, solve_rpp
+from rpp.visualization import visualize_solution
 from rpp.gpx_export import export_edge_list_gpx, export_gpx
 
 
@@ -37,6 +38,11 @@ def main():
         "--drpp-blockers-gpx",
         default=None,
         help="Write blocking required edges to this GPX path",
+    )
+    parser.add_argument(
+        "--visualize",
+        default=None,
+        help="Write an HTML visualization of the RPP solution to this path",
     )
     args = parser.parse_args()
 
@@ -78,10 +84,14 @@ def main():
             diagnostics_path=args.drpp_diagnostics,
         )
         export_gpx(E, G_service_directed, "rpp_route.gpx")
+        if args.visualize:
+            visualize_solution(E, G_service_directed, args.visualize)
     else:
         R = build_required_graph_undirected(G_service_undirected)
         E = solve_rpp(G_drive, G_service_undirected, R)
         export_gpx(E, G_service_undirected, "rpp_route.gpx")
+        if args.visualize:
+            visualize_solution(E, G_service_undirected, args.visualize)
     print("Done. GPX written: rpp_route.gpx")
 
 
