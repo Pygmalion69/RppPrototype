@@ -11,21 +11,21 @@ def export_gpx(
     E: nx.MultiGraph,
     G: nx.MultiGraph,
     filename: str,
-    start: tuple[float, float] | None = None,
+    *,
+    start_node=None,
+    end_node=None,
 ):
-    if start is None:
+    if end_node is not None and start_node is None:
+        raise ValueError("end_node requires start_node for GPX export.")
+    open_route = end_node is not None and start_node is not None and end_node != start_node
+
+    if start_node is None:
         tour = list(nx.eulerian_circuit(E, keys=True))
     else:
-        start_node, snapped, distance_m, component_strategy = select_start_node(E, G, start)
-        print(
-            "Requested start (lat, lon): "
-            f"({start[0]:.6f}, {start[1]:.6f}); "
-            "snapped start (lat, lon): "
-            f"({snapped[0]:.6f}, {snapped[1]:.6f}); "
-            f"node={start_node}; distance_m={distance_m:.2f}; "
-            f"component={component_strategy}"
-        )
-        tour = list(nx.eulerian_circuit(E, source=start_node, keys=True))
+        if open_route:
+            tour = list(nx.eulerian_path(E, source=start_node, keys=True))
+        else:
+            tour = list(nx.eulerian_circuit(E, source=start_node, keys=True))
 
     gpx = gpxpy.gpx.GPX()
     trk = gpxpy.gpx.GPXTrack()
@@ -83,29 +83,48 @@ def select_start_node(
     start: tuple[float, float],
 ) -> tuple[int, tuple[float, float], float, str]:
     component_nodes, component_strategy = _select_component_nodes(E)
+    node, coords, distance = _select_nearest_node(component_nodes, G, start)
+    return node, coords, distance, component_strategy
 
-    start_lat, start_lon = start
-    best_node = None
-    best_distance = None
-    best_coords = None
-    for node in component_nodes:
-        node_data = G.nodes.get(node)
-        if node_data is None:
-            continue
-        if "x" not in node_data or "y" not in node_data:
-            raise ValueError("Node coordinate attributes x/y missing for start point snapping.")
-        node_lon = node_data["x"]
-        node_lat = node_data["y"]
-        distance = haversine_m(start_lat, start_lon, node_lat, node_lon)
-        if best_distance is None or distance < best_distance:
-            best_node = node
-            best_distance = distance
-            best_coords = (node_lat, node_lon)
 
-    if best_node is None or best_distance is None or best_coords is None:
-        raise ValueError("Unable to snap start point: no nodes with coordinates found.")
+def select_end_node(
+    E: nx.MultiGraph,
+    G: nx.MultiGraph,
+    end: tuple[float, float],
+) -> tuple[int, tuple[float, float], float, str]:
+    component_nodes, component_strategy = _select_component_nodes(E)
+    node, coords, distance = _select_nearest_node(component_nodes, G, end)
+    return node, coords, distance, component_strategy
 
-    return best_node, best_coords, best_distance, component_strategy
+
+def select_endpoint_nodes(
+    E: nx.MultiGraph,
+    G: nx.MultiGraph,
+    start: tuple[float, float],
+    end: tuple[float, float] | None,
+) -> tuple[
+    int,
+    tuple[float, float],
+    float,
+    int | None,
+    tuple[float, float] | None,
+    float | None,
+    str,
+]:
+    component_nodes, component_strategy = _select_component_nodes(E)
+    start_node, start_coords, start_distance = _select_nearest_node(component_nodes, G, start)
+    if end is None:
+        return start_node, start_coords, start_distance, None, None, None, component_strategy
+    end_node, end_coords, end_distance = _select_nearest_node(component_nodes, G, end)
+    return (
+        start_node,
+        start_coords,
+        start_distance,
+        end_node,
+        end_coords,
+        end_distance,
+        component_strategy,
+    )
 
 
 def _select_component_nodes(E: nx.MultiGraph) -> tuple[set[int], str]:
@@ -122,6 +141,35 @@ def _select_component_nodes(E: nx.MultiGraph) -> tuple[set[int], str]:
 
     largest = max(components, key=len)
     return set(largest), "largest_component"
+
+
+def _select_nearest_node(
+    component_nodes: set[int],
+    G: nx.MultiGraph,
+    target: tuple[float, float],
+) -> tuple[int, tuple[float, float], float]:
+    target_lat, target_lon = target
+    best_node = None
+    best_distance = None
+    best_coords = None
+    for node in component_nodes:
+        node_data = G.nodes.get(node)
+        if node_data is None:
+            continue
+        if "x" not in node_data or "y" not in node_data:
+            raise ValueError("Node coordinate attributes x/y missing for point snapping.")
+        node_lon = node_data["x"]
+        node_lat = node_data["y"]
+        distance = haversine_m(target_lat, target_lon, node_lat, node_lon)
+        if best_distance is None or distance < best_distance:
+            best_node = node
+            best_distance = distance
+            best_coords = (node_lat, node_lon)
+
+    if best_node is None or best_distance is None or best_coords is None:
+        raise ValueError("Unable to snap point: no nodes with coordinates found.")
+
+    return best_node, best_coords, best_distance
 
 
 def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
