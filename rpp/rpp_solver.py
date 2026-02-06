@@ -1,9 +1,11 @@
+from __future__ import annotations
+
 import itertools
 import networkx as nx
 
 
-def solve_rpp(
-    G_drive: nx.Graph,  # <- accepts MultiDiGraph OR MultiGraph
+def build_rpp_base_graph(
+    G_drive: nx.Graph,
     G_service: nx.MultiGraph,
     R: nx.Graph,
 ) -> nx.MultiGraph:
@@ -40,7 +42,7 @@ def solve_rpp(
 
         connector_paths.append(path)
 
-    # ---- Step 1: Build Eulerian multigraph E with geometry (from service graph) ----
+    # ---- Step 1: Build multigraph E with geometry (from service graph) ----
     E = nx.MultiGraph()
 
     # Required edges
@@ -52,16 +54,58 @@ def solve_rpp(
         for u, v in zip(path[:-1], path[1:]):
             add_edge_with_geometry(E, G_service, u, v, kind="connector")
 
+    return E
+
+
+def solve_rpp(
+    G_drive: nx.Graph,  # <- accepts MultiDiGraph OR MultiGraph
+    G_service: nx.MultiGraph,
+    R: nx.Graph,
+    *,
+    start_node=None,
+    end_node=None,
+    base_graph: nx.MultiGraph | None = None,
+) -> nx.MultiGraph:
+    """
+    Solve an RPP-like problem where:
+      - R defines the REQUIRED edges to be serviced (undirected)
+      - shortest paths for CONNECTORS + MATCHING are computed on G_drive (directed, one-way aware)
+      - edge geometry is taken from G_service (undirected view of the drivable network)
+
+    Returns:
+      - E: nx.MultiGraph, Eulerian multigraph whose edges include:
+            weight: float
+            geometry: shapely LineString or None (should be mostly present)
+            kind: "required" | "connector" | "duplicate"
+    """
+
+    if end_node is not None and start_node is None:
+        raise ValueError("end_node requires start_node.")
+
+    E = base_graph.copy() if base_graph is not None else build_rpp_base_graph(G_drive, G_service, R)
+
+    if start_node is not None and start_node not in E.nodes:
+        raise ValueError(f"start_node {start_node} is not present in the routing graph.")
+    if end_node is not None and end_node not in E.nodes:
+        raise ValueError(f"end_node {end_node} is not present in the routing graph.")
+
+    open_route = end_node is not None and start_node is not None and end_node != start_node
+
     # ---- Step 2: Fix odd degrees via min-weight matching (distances from directed graph) ----
-    odd = [n for n in E.nodes if E.degree(n) % 2 == 1]
+    odd = {n for n in E.nodes if E.degree(n) % 2 == 1}
+    if open_route:
+        odd ^= {start_node, end_node}
+
     if len(odd) % 2 != 0:
         raise RuntimeError(f"Odd node count is not even: {len(odd)}")
+
+    odd_list = sorted(odd)
 
     # Build complete graph on odd nodes with directed shortest-path distances
     K = nx.Graph()
     sp_cache = {}
 
-    for u, v in itertools.combinations(odd, 2):
+    for u, v in itertools.combinations(odd_list, 2):
         try:
             dist, path = nx.single_source_dijkstra(G_drive, u, v, weight="weight")
             K.add_edge(u, v, weight=dist)
@@ -77,8 +121,8 @@ def solve_rpp(
                 pass
 
     # Ensure matching graph is connected enough
-    if K.number_of_nodes() != len(odd):
-        missing = set(odd) - set(K.nodes())
+    if K.number_of_nodes() != len(odd_list):
+        missing = set(odd_list) - set(K.nodes())
         raise RuntimeError(f"Matching graph missing nodes (no paths found): {sorted(missing)[:10]}...")
 
     matching = nx.algorithms.matching.min_weight_matching(K, weight="weight")
@@ -96,14 +140,25 @@ def solve_rpp(
     if not nx.is_connected(E):
         raise RuntimeError("RPP result is not connected (after connectors + matching).")
 
-    if not nx.is_eulerian(E):
-        odd_after = [n for n in E.nodes if E.degree(n) % 2 == 1]
-        raise RuntimeError(f"RPP result is not Eulerian. Odd nodes remaining: {len(odd_after)}")
+    if open_route:
+        odd_after = {n for n in E.nodes if E.degree(n) % 2 == 1}
+        expected = {start_node, end_node}
+        if odd_after != expected:
+            raise RuntimeError(
+                "RPP open route is not valid. "
+                f"Odd nodes remaining: {sorted(odd_after)}; expected {sorted(expected)}"
+            )
+        if not nx.has_eulerian_path(E):
+            raise RuntimeError("RPP open route has no Eulerian path.")
+    else:
+        if not nx.is_eulerian(E):
+            odd_after = [n for n in E.nodes if E.degree(n) % 2 == 1]
+            raise RuntimeError(f"RPP result is not Eulerian. Odd nodes remaining: {len(odd_after)}")
 
     return E
 
 
-def solve_drpp(
+def build_drpp_base_graph(
     G_drive: nx.MultiDiGraph,
     G_service_directed: nx.MultiDiGraph,
     R: nx.DiGraph,
@@ -185,7 +240,7 @@ def solve_drpp(
 
         connector_paths.append(path)
 
-    # ---- Step 1: Build Eulerian multigraph E with geometry (from service graph) ----
+    # ---- Step 1: Build multigraph E with geometry (from service graph) ----
     E = nx.MultiDiGraph()
 
     # Required arcs
@@ -197,8 +252,58 @@ def solve_drpp(
         for u, v in zip(path[:-1], path[1:]):
             add_arc_with_geometry(E, G_service_directed, u, v, kind="connector")
 
+    return E
+
+
+def solve_drpp(
+    G_drive: nx.MultiDiGraph,
+    G_service_directed: nx.MultiDiGraph,
+    R: nx.DiGraph,
+    *,
+    diagnostics_path: str = None,
+    start_node=None,
+    end_node=None,
+    base_graph: nx.MultiDiGraph | None = None,
+) -> nx.MultiDiGraph:
+    """
+    Solve a directed RPP-like problem where:
+      - R defines the REQUIRED arcs to be serviced (directed)
+      - shortest paths for CONNECTORS + DUPLICATES are computed on G_drive (directed, one-way aware)
+      - edge geometry is taken from G_service_directed (directed view of the drivable network)
+
+    Returns:
+      - E: nx.MultiDiGraph, Eulerian multigraph whose edges include:
+            weight: float
+            geometry: shapely LineString or None (should be mostly present)
+            kind: "required" | "connector" | "duplicate"
+    """
+
+    if end_node is not None and start_node is None:
+        raise ValueError("end_node requires start_node.")
+
+    if base_graph is None:
+        E = build_drpp_base_graph(
+            G_drive,
+            G_service_directed,
+            R,
+            diagnostics_path=diagnostics_path,
+        )
+    else:
+        E = base_graph.copy()
+
+    if start_node is not None and start_node not in E.nodes:
+        raise ValueError(f"start_node {start_node} is not present in the routing graph.")
+    if end_node is not None and end_node not in E.nodes:
+        raise ValueError(f"end_node {end_node} is not present in the routing graph.")
+
+    open_route = end_node is not None and start_node is not None and end_node != start_node
+
     # ---- Step 2: Balance in/out degrees via min-cost flow ----
     delta = {n: E.out_degree(n) - E.in_degree(n) for n in E.nodes}
+    if open_route:
+        delta[start_node] -= 1
+        delta[end_node] += 1
+
     d_minus = [n for n, d in delta.items() if d < 0]
     d_plus = [n for n, d in delta.items() if d > 0]
 
@@ -231,12 +336,34 @@ def solve_drpp(
                         add_arc_with_geometry(E, G_service_directed, a, b, kind="duplicate")
 
     # ---- Step 3: final invariants ----
-    for n in E.nodes:
-        if E.out_degree(n) != E.in_degree(n):
-            raise RuntimeError(f"Directed imbalance remains at {n}: out={E.out_degree(n)}, in={E.in_degree(n)}")
+    if open_route:
+        delta_after = {n: E.out_degree(n) - E.in_degree(n) for n in E.nodes}
+        for n, d in delta_after.items():
+            if n == start_node:
+                if d != 1:
+                    raise RuntimeError(
+                        f"Directed open route imbalance at start {n}: out-in={d} (expected 1)."
+                    )
+            elif n == end_node:
+                if d != -1:
+                    raise RuntimeError(
+                        f"Directed open route imbalance at end {n}: out-in={d} (expected -1)."
+                    )
+            elif d != 0:
+                raise RuntimeError(
+                    f"Directed open route imbalance remains at {n}: out-in={d} (expected 0)."
+                )
+        if not nx.has_eulerian_path(E):
+            raise RuntimeError("Directed RPP open route has no Eulerian path.")
+    else:
+        for n in E.nodes:
+            if E.out_degree(n) != E.in_degree(n):
+                raise RuntimeError(
+                    f"Directed imbalance remains at {n}: out={E.out_degree(n)}, in={E.in_degree(n)}"
+                )
 
-    if not nx.is_eulerian(E):
-        raise RuntimeError("Directed RPP result is not Eulerian.")
+        if not nx.is_eulerian(E):
+            raise RuntimeError("Directed RPP result is not Eulerian.")
 
     return E
 
