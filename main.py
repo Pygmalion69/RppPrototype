@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from rpp.graph_loader import load_graphs
@@ -34,9 +35,18 @@ def _parse_point(label: str, raw: str | None) -> tuple[float, float] | None:
     return lat, lon
 
 
+def _default_osm_path() -> str:
+    # Prefer bundled data when running as a PyInstaller onefile binary.
+    if getattr(sys, "_MEIPASS", None):
+        bundled = os.path.join(sys._MEIPASS, "data", "area.osm")
+        if os.path.exists(bundled):
+            return bundled
+    return os.path.join("data", "area.osm")
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--osm", default="data/area.osm", help="Path to .osm file")
+    parser.add_argument("--osm", default=None, help="Path to .osm file")
     parser.add_argument(
         "--ignore-oneway",
         action="store_true",
@@ -73,6 +83,8 @@ def main():
         help="Optional end coordinate as 'lat,lon' to snap to the nearest node",
     )
     args = parser.parse_args()
+    if args.osm is None:
+        args.osm = _default_osm_path()
 
     start_request = _parse_point("start", args.start)
     end_request = _parse_point("end", args.end)
